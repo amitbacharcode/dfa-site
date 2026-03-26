@@ -110,19 +110,28 @@ function ExportAsLaTeX() {
 	this.advancedFillText = function(text, originalText, x, y, angleOrNull) {
 		if(text.replace(' ', '').length > 0) {
 			var nodeParams = '';
-			// x and y start off as the center of the text, but will be moved to one side of the box when angleOrNull != null
+			var offsetStr = '';
+
+			// בדיקה אם הטקסט שייך לאובייקט עם Offset
+			if (selectedObject && selectedObject.text === originalText && selectedObject.textOffset !== 0) {
+				offsetStr = ',yshift=' + (selectedObject.textOffset * 0.5) + 'mm';
+			}
+
 			if(angleOrNull != null) {
 				var width = this.measureText(text).width;
 				var dx = Math.cos(angleOrNull);
 				var dy = Math.sin(angleOrNull);
 				if(Math.abs(dx) > Math.abs(dy)) {
-					if(dx > 0) nodeParams = '[right] ', x -= width / 2;
-					else nodeParams = '[left] ', x += width / 2;
+					if(dx > 0) nodeParams = '[right' + offsetStr + '] ', x -= width / 2;
+					else nodeParams = '[left' + offsetStr + '] ', x += width / 2;
 				} else {
-					if(dy > 0) nodeParams = '[below] ', y -= 10;
-					else nodeParams = '[above] ', y += 10;
+					if(dy > 0) nodeParams = '[below' + offsetStr + '] ', y -= 10;
+					else nodeParams = '[above' + offsetStr + '] ', y += 10;
 				}
+			} else if (offsetStr !== '') {
+				nodeParams = '[yshift=' + (selectedObject.textOffset * 0.5) + 'mm] ';
 			}
+
 			x *= this._scale;
 			y *= this._scale;
 			this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node ' + nodeParams + '{$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
@@ -231,6 +240,7 @@ function StartLink(node, start) {
 	this.deltaX = 0;
 	this.deltaY = 0;
 	this.text = '';
+	this.textOffset = 0;
 
 	if(start) {
 		this.setAnchorPoint(start.x, start.y);
@@ -298,6 +308,7 @@ function Link(a, b) {
 	// make anchor point relative to the locations of nodeA and nodeB
 	this.parallelPart = 0.5; // percentage from nodeA to nodeB
 	this.perpendicularPart = 0; // pixels from line between nodeA and nodeB
+	this.textOffset = 0;
 }
 
 Link.prototype.getAnchorPoint = function() {
@@ -490,6 +501,7 @@ function SelfLink(node, mouse) {
 	this.anchorAngle = 0;
 	this.mouseOffsetAngle = 0;
 	this.text = '';
+	this.textOffset = 0;
 
 	if(mouse) {
 		this.setAnchorPoint(mouse.x, mouse.y);
@@ -694,28 +706,28 @@ function fixed(number, digits) {
 var greekLetterNames = [ 'Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta', 'Eta', 'Theta', 'Iota', 'Kappa', 'Lambda', 'Mu', 'Nu', 'Xi', 'Omicron', 'Pi', 'Rho', 'Sigma', 'Tau', 'Upsilon', 'Phi', 'Chi', 'Psi', 'Omega' ];
 
 function convertLatexShortcuts(text) {
-	// html greek characters
-	for(var i = 0; i < greekLetterNames.length; i++) {
-		var name = greekLetterNames[i];
-		text = text.replace(new RegExp('\\\\' + name, 'g'), String.fromCharCode(913 + i + (i > 16)));
-		text = text.replace(new RegExp('\\\\' + name.toLowerCase(), 'g'), String.fromCharCode(945 + i + (i > 16)));
-	}
+    for(var i = 0; i < greekLetterNames.length; i++) {
+        var name = greekLetterNames[i];
+        text = text.replace(new RegExp('\\\\' + name, 'g'), String.fromCharCode(913 + i + (i > 16)));
+        text = text.replace(new RegExp('\\\\' + name.toLowerCase(), 'g'), String.fromCharCode(945 + i + (i > 16)));
+    }
 
-	for(var i = 0; i < 10; i++) {
-		text = text.replace(new RegExp('_' + i, 'g'), String.fromCharCode(8320 + i));
-	}
-	
-	const subAlphabet = {
-		'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ', 'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 
-		'n': 'ₙ', 'o': 'ₒ', 'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ', 'v': 'ᵥ', 'x': 'ₓ'
-	};
-	
-	for (let char in subAlphabet) {
-		text = text.replace(new RegExp('_' + char, 'g'), subAlphabet[char]);
-	}
-    // ------------------
+    const subMap = {
+        '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+        'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ', 'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ', 
+        'o': 'ₒ', 'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ', 'v': 'ᵥ', 'x': 'ₓ',
+        '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎'
+    };
 
-	return text;
+    function toSubscript(str) {
+        return str.split('').map(char => subMap[char] || char).join('');
+    }
+
+    text = text.replace(/_\{([^}]+)\}/g, function(match, p1) { return toSubscript(p1); });
+
+    text = text.replace(/_([a-z0-9])/gi, function(match, p1) { return toSubscript(p1); });
+
+    return text;
 }
 
 function textToXML(text) {
@@ -765,7 +777,12 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
 		y += cornerPointY + cos * slide;
 	}
 
-	// draw text and caret (round the coordinates so the caret falls on a pixel)
+	// החלת ה-Offset אם האובייקט נבחר ויש לו ערך כזה
+	if (isSelected && selectedObject && typeof selectedObject.textOffset !== 'undefined') {
+		y -= selectedObject.textOffset;
+	}
+
+	// draw text and caret
 	if('advancedFillText' in c) {
 		c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull);
 	} else {
@@ -973,16 +990,28 @@ document.onkeydown = function(e) {
 	if(key == 16) {
 		shift = true;
 	} else if(!canvasHasFocus()) {
-		// don't read keystrokes when other things have focus
 		return true;
-	} else if(key == 8) { // backspace key
+	} 
+	
+	// שליטה במיקום הטקסט באמצעות חצים למעלה/למטה
+	if(selectedObject != null && typeof selectedObject.textOffset !== 'undefined') {
+		if(key == 38) { // Up Arrow
+			selectedObject.textOffset += 2;
+			draw();
+			return false;
+		} else if(key == 40) { // Down Arrow
+			selectedObject.textOffset -= 2;
+			draw();
+			return false;
+		}
+	}
+
+	if(key == 8) { // backspace key
 		if(selectedObject != null && 'text' in selectedObject) {
 			selectedObject.text = selectedObject.text.substr(0, selectedObject.text.length - 1);
 			resetCaret();
 			draw();
 		}
-
-		// backspace is a shortcut for the back button, but do NOT want to change pages
 		return false;
 	} else if(key == 46) { // delete key
 		if(selectedObject != null) {
