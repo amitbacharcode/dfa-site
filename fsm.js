@@ -108,35 +108,40 @@ function ExportAsLaTeX() {
 		return c.measureText(text);
 	};
 	this.advancedFillText = function(text, originalText, x, y, angleOrNull) {
-		if(text.replace(' ', '').length > 0) {
-			var nodeParams = '';
-			var offsetStr = '';
+    if(text.replace(' ', '').length > 0) {
+        var nodeParams = '';
+        var offsetValue = 0;
 
-			// בדיקה אם הטקסט שייך לאובייקט עם Offset
-			if (selectedObject && selectedObject.text === originalText && selectedObject.textOffset !== 0) {
-				offsetStr = ',yshift=' + (selectedObject.textOffset * 0.5) + 'mm';
-			}
+        // זיהוי האופסט מהאובייקט הנבחר
+        if (selectedObject && selectedObject.text === originalText && selectedObject.textOffset !== 0) {
+            offsetValue = selectedObject.textOffset * 0.1; // המרה לקנה מידה של לטקס
+        }
 
-			if(angleOrNull != null) {
-				var width = this.measureText(text).width;
-				var dx = Math.cos(angleOrNull);
-				var dy = Math.sin(angleOrNull);
-				if(Math.abs(dx) > Math.abs(dy)) {
-					if(dx > 0) nodeParams = '[right' + offsetStr + '] ', x -= width / 2;
-					else nodeParams = '[left' + offsetStr + '] ', x += width / 2;
-				} else {
-					if(dy > 0) nodeParams = '[below' + offsetStr + '] ', y -= 10;
-					else nodeParams = '[above' + offsetStr + '] ', y += 10;
-				}
-			} else if (offsetStr !== '') {
-				nodeParams = '[yshift=' + (selectedObject.textOffset * 0.5) + 'mm] ';
-			}
+        if(angleOrNull != null) {
+            var width = this.measureText(text).width;
+            var dx = Math.cos(angleOrNull);
+            var dy = Math.sin(angleOrNull);
+            
+            // הגדרת כיוון בסיס
+            var side = (dy > 0) ? 'below' : 'above';
+            if (Math.abs(dx) > 0.8) side = (dy > 0) ? 'below' : 'above'; // חצים אופקיים
+            
+            // ב-TikZ, הפקודה "node[above=5pt]" מזיזה את הטקסט בניצב לקו
+            nodeParams = '[' + side + '=' + (5 + offsetValue * 10) + 'pt] ';
+            
+            // תיקון מיקום x/y כדי שיהיה במרכז החץ
+            if(Math.abs(dx) > Math.abs(dy)) {
+                if(dx > 0) x -= width / 2; else x += width / 2;
+            } else {
+                if(dy > 0) y -= 10; else y += 10;
+            }
+        }
 
-			x *= this._scale;
-			y *= this._scale;
-			this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node ' + nodeParams + '{$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
-		}
-	};
+        x *= this._scale;
+        y *= this._scale;
+        this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node ' + nodeParams + '{$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
+    }
+};
 
 	this.translate = this.save = this.restore = this.clearRect = function(){};
 }
@@ -759,44 +764,53 @@ function canvasHasFocus() {
 }
 
 function drawText(c, originalText, x, y, angleOrNull, isSelected) {
-	text = convertLatexShortcuts(originalText);
-	c.font = '20px "Times New Roman", serif';
-	var width = c.measureText(text).width;
+    text = convertLatexShortcuts(originalText);
+    c.font = '20px "Times New Roman", serif';
+    var width = c.measureText(text).width;
 
-	// center the text
-	x -= width / 2;
+    // מרכז את הטקסט
+    x -= width / 2;
 
-	// position the text intelligently if given an angle
-	if(angleOrNull != null) {
-		var cos = Math.cos(angleOrNull);
-		var sin = Math.sin(angleOrNull);
-		var cornerPointX = (width / 2 + 5) * (cos > 0 ? 1 : -1);
-		var cornerPointY = (10 + 5) * (sin > 0 ? 1 : -1);
-		var slide = sin * Math.pow(Math.abs(sin), 40) * cornerPointX - cos * Math.pow(Math.abs(cos), 10) * cornerPointY;
-		x += cornerPointX - sin * slide;
-		y += cornerPointY + cos * slide;
-	}
+    // מיקום חכם לפי זווית
+    if(angleOrNull != null) {
+        var cos = Math.cos(angleOrNull);
+        var sin = Math.sin(angleOrNull);
+        var cornerPointX = (width / 2 + 5) * (cos > 0 ? 1 : -1);
+        var cornerPointY = (10 + 5) * (sin > 0 ? 1 : -1);
+        var slide = sin * Math.pow(Math.abs(sin), 40) * cornerPointX - cos * Math.pow(Math.abs(cos), 10) * cornerPointY;
+        x += cornerPointX - sin * slide;
+        y += cornerPointY + cos * slide;
 
-	// החלת ה-Offset אם האובייקט נבחר ויש לו ערך כזה
-	if (isSelected && selectedObject && typeof selectedObject.textOffset !== 'undefined') {
-		y -= selectedObject.textOffset;
-	}
+        // --- השינוי החדש כאן ---
+        // הזזה בניצב לכיוון החץ (Perpendicular offset)
+        if (selectedObject && typeof selectedObject.textOffset !== 'undefined') {
+            // אנחנו מזיזים בכיוון הניצב לזווית החץ
+            // הזווית של הניצב היא angleOrNull - PI/2
+            x += selectedObject.textOffset * Math.sin(angleOrNull);
+            y -= selectedObject.textOffset * Math.cos(angleOrNull);
+        }
+    } else {
+        // אם אין זווית (למשל טקסט בתוך עיגול), הזזה רגילה למעלה
+        if (isSelected && selectedObject && typeof selectedObject.textOffset !== 'undefined') {
+            y -= selectedObject.textOffset;
+        }
+    }
 
-	// draw text and caret
-	if('advancedFillText' in c) {
-		c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull);
-	} else {
-		x = Math.round(x);
-		y = Math.round(y);
-		c.fillText(text, x, y + 6);
-		if(isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
-			x += width;
-			c.beginPath();
-			c.moveTo(x, y - 10);
-			c.lineTo(x, y + 10);
-			c.stroke();
-		}
-	}
+    // ציור הטקסט
+    if('advancedFillText' in c) {
+        c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull);
+    } else {
+        x = Math.round(x);
+        y = Math.round(y);
+        c.fillText(text, x, y + 6);
+        if(isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
+            x += width;
+            c.beginPath();
+            c.moveTo(x, y - 10);
+            c.lineTo(x, y + 10);
+            c.stroke();
+        }
+    }
 }
 
 var caretTimer;
