@@ -65,17 +65,14 @@ function ExportAsLaTeX() {
 		c.font = '20px "Times New Roman", serif';
 		return c.measureText(text);
 	};
-	this.advancedFillText = function(text, originalText, x, y, angleOrNull) {
+	// FIX: receives sourceObj directly instead of searching by text content
+	this.advancedFillText = function(text, originalText, x, y, angleOrNull, sourceObj) {
 		if(text.replace(' ', '').length > 0) {
 			var nodeParams = '';
 			var offsetValue = 0;
 
-            // Find the object this text belongs to to get its offset
-            var currentObj = null;
-            for(var i=0; i<links.length; i++) { if(links[i].text === originalText) { currentObj = links[i]; break; } }
-
-			if (currentObj && currentObj.textOffset !== 0) {
-				offsetValue = currentObj.textOffset * 0.1; 
+			if (sourceObj && sourceObj.textOffset !== 0) {
+				offsetValue = sourceObj.textOffset * 0.1;
 			}
 
 			if(angleOrNull != null) {
@@ -84,15 +81,15 @@ function ExportAsLaTeX() {
 				var dy = Math.sin(angleOrNull);
 				var side = (dy > 0) ? 'below' : 'above';
 				nodeParams = '[' + side + '=' + (5 + offsetValue * 8) + 'pt] ';
-				
+
 				if(Math.abs(dx) > Math.abs(dy)) {
 					if(dx > 0) x -= width / 2; else x += width / 2;
 				} else {
 					if(dy > 0) y -= 10; else y += 10;
 				}
 			} else if (offsetValue !== 0) {
-                nodeParams = '[yshift=' + fixed(-offsetValue*10, 2) + 'mm] ';
-            }
+				nodeParams = '[yshift=' + fixed(-offsetValue*10, 2) + 'mm] ';
+			}
 
 			x *= this._scale; y *= this._scale;
 			this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node ' + nodeParams + '{$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
@@ -134,7 +131,7 @@ function ExportAsSVG() {
 		for(var i = 0; i < this._points.length; i++) this._svgData += (i > 0 ? ' ' : '') + fixed(this._points[i].x, 3) + ',' + fixed(this._points[i].y, 3);
 		this._svgData += '"/>\n';
 	};
-    this.fill = function() {
+	this.fill = function() {
 		if(this._points.length == 0) return;
 		this._svgData += '\t<polygon fill="' + this.fillStyle + '" points="';
 		for(var i = 0; i < this._points.length; i++) this._svgData += (i > 0 ? ' ' : '') + fixed(this._points[i].x, 3) + ',' + fixed(this._points[i].y, 3);
@@ -171,7 +168,8 @@ StartLink.prototype.draw = function(c) {
 	var stuff = this.getEndPoints();
 	c.beginPath(); c.moveTo(stuff.startX, stuff.startY); c.lineTo(stuff.endX, stuff.endY); c.stroke();
 	var textAngle = Math.atan2(stuff.startY - stuff.endY, stuff.startX - stuff.endX);
-	drawText(c, this.text, stuff.startX, stuff.startY, textAngle, selectedObject == this);
+	// FIX: pass 'this' so drawText knows which object owns the text
+	drawText(c, this.text, stuff.startX, stuff.startY, textAngle, selectedObject == this, this);
 	drawArrow(c, stuff.endX, stuff.endY, Math.atan2(-this.deltaY, -this.deltaX));
 };
 StartLink.prototype.containsPoint = function(x, y) {
@@ -218,10 +216,12 @@ Link.prototype.draw = function(c) {
 	if(stuff.hasCircle) {
 		var startAngle = stuff.startAngle; var endAngle = stuff.endAngle; if(endAngle < startAngle) endAngle += Math.PI * 2;
 		var textAngle = (startAngle + endAngle) / 2 + stuff.isReversed * Math.PI;
-		drawText(c, this.text, stuff.circleX + stuff.circleRadius * Math.cos(textAngle), stuff.circleY + stuff.circleRadius * Math.sin(textAngle), textAngle, selectedObject == this);
+		// FIX: pass 'this' so drawText knows which object owns the text
+		drawText(c, this.text, stuff.circleX + stuff.circleRadius * Math.cos(textAngle), stuff.circleY + stuff.circleRadius * Math.sin(textAngle), textAngle, selectedObject == this, this);
 	} else {
 		var textAngle = Math.atan2(stuff.endX - stuff.startX, stuff.startY - stuff.endY);
-		drawText(c, this.text, (stuff.startX + stuff.endX) / 2, (stuff.startY + stuff.endY) / 2, textAngle + this.lineAngleAdjust, selectedObject == this);
+		// FIX: text drawn at midpoint of arrow (was already correct), pass 'this'
+		drawText(c, this.text, (stuff.startX + stuff.endX) / 2, (stuff.startY + stuff.endY) / 2, textAngle + this.lineAngleAdjust, selectedObject == this, this);
 	}
 };
 Link.prototype.containsPoint = function(x, y) {
@@ -244,12 +244,13 @@ Link.prototype.containsPoint = function(x, y) {
 	return false;
 };
 
-function Node(x, y) { this.x = x; this.y = y; this.mouseOffsetX = 0; this.mouseOffsetY = 0; this.isAcceptState = false; this.text = ''; }
+function Node(x, y) { this.x = x; this.y = y; this.mouseOffsetX = 0; this.mouseOffsetY = 0; this.isAcceptState = false; this.text = ''; this.textOffset = 0; }
 Node.prototype.setMouseStart = function(x, y) { this.mouseOffsetX = this.x - x; this.mouseOffsetY = this.y - y; };
 Node.prototype.setAnchorPoint = function(x, y) { this.x = x + this.mouseOffsetX; this.y = y + this.mouseOffsetY; };
 Node.prototype.draw = function(c) {
 	c.beginPath(); c.arc(this.x, this.y, nodeRadius, 0, 2 * Math.PI, false); c.stroke();
-	drawText(c, this.text, this.x, this.y, null, selectedObject == this);
+	// FIX: pass 'this' so drawText can apply node's textOffset too
+	drawText(c, this.text, this.x, this.y, null, selectedObject == this, this);
 	if(this.isAcceptState) { c.beginPath(); c.arc(this.x, this.y, nodeRadius - 6, 0, 2 * Math.PI, false); c.stroke(); }
 };
 Node.prototype.closestPointOnCircle = function(x, y) {
@@ -273,7 +274,8 @@ SelfLink.prototype.getEndPointsAndCircle = function() {
 SelfLink.prototype.draw = function(c) {
 	var stuff = this.getEndPointsAndCircle();
 	c.beginPath(); c.arc(stuff.circleX, stuff.circleY, stuff.circleRadius, stuff.startAngle, stuff.endAngle, false); c.stroke();
-	drawText(c, this.text, stuff.circleX + stuff.circleRadius * Math.cos(this.anchorAngle), stuff.circleY + stuff.circleRadius * Math.sin(this.anchorAngle), this.anchorAngle, selectedObject == this);
+	// FIX: pass 'this' so drawText knows which object owns the text
+	drawText(c, this.text, stuff.circleX + stuff.circleRadius * Math.cos(this.anchorAngle), stuff.circleY + stuff.circleRadius * Math.sin(this.anchorAngle), this.anchorAngle, selectedObject == this, this);
 	drawArrow(c, stuff.endX, stuff.endY, stuff.endAngle + Math.PI * 0.4);
 };
 SelfLink.prototype.containsPoint = function(x, y) {
@@ -292,7 +294,7 @@ function restoreBackup() {
 	try {
 		var backup = JSON.parse(localStorage['fsm']);
 		for(var i = 0; i < backup.nodes.length; i++) {
-			var bN = backup.nodes[i]; var node = new Node(bN.x, bN.y); node.isAcceptState = bN.isAcceptState; node.text = bN.text; nodes.push(node);
+			var bN = backup.nodes[i]; var node = new Node(bN.x, bN.y); node.isAcceptState = bN.isAcceptState; node.text = bN.text; node.textOffset = bN.textOffset || 0; nodes.push(node);
 		}
 		for(var i = 0; i < backup.links.length; i++) {
 			var bL = backup.links[i]; var link = null;
@@ -308,7 +310,7 @@ function saveBackup() {
 	if(!localStorage || !JSON) return;
 	var backup = { 'nodes': [], 'links': [] };
 	for(var i = 0; i < nodes.length; i++) {
-		var n = nodes[i]; backup.nodes.push({ 'x': n.x, 'y': n.y, 'text': n.text, 'isAcceptState': n.isAcceptState });
+		var n = nodes[i]; backup.nodes.push({ 'x': n.x, 'y': n.y, 'text': n.text, 'isAcceptState': n.isAcceptState, 'textOffset': n.textOffset });
 	}
 	for(var i = 0; i < links.length; i++) {
 		var l = links[i]; var bL = null;
@@ -358,11 +360,17 @@ function drawArrow(c, x, y, angle) {
 
 function canvasHasFocus() { return (document.activeElement || document.body) == document.body; }
 
-function drawText(c, originalText, x, y, angleOrNull, isSelected) {
+// FIX: added sourceObj parameter — the link/node that owns this text label.
+// This replaces the fragile text-content search and ensures offsets always apply,
+// not just when the object is selected.
+function drawText(c, originalText, x, y, angleOrNull, isSelected, sourceObj) {
 	var text = convertLatexShortcuts(originalText);
 	c.font = '20px "Times New Roman", serif';
 	var width = c.measureText(text).width;
 	x -= width / 2;
+
+	// Retrieve offset from the owning object directly (no search needed)
+	var textOffset = (sourceObj && typeof sourceObj.textOffset !== 'undefined') ? sourceObj.textOffset : 0;
 
 	if(angleOrNull != null) {
 		var cos = Math.cos(angleOrNull); var sin = Math.sin(angleOrNull);
@@ -370,19 +378,22 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
 		var slide = sin * Math.pow(Math.abs(sin), 40) * cornerX - cos * Math.pow(Math.abs(cos), 10) * cornerY;
 		x += cornerX - sin * slide; y += cornerY + cos * slide;
 
-        // Apply Perpendicular Offset
-        var currentObj = null;
-        for(var i=0; i<links.length; i++) { if(links[i].text === originalText) { currentObj = links[i]; break; } }
-        if (currentObj && currentObj.textOffset !== 0) {
-            x += currentObj.textOffset * Math.sin(angleOrNull);
-            y -= currentObj.textOffset * Math.cos(angleOrNull);
-        }
-	} else if (isSelected && selectedObject && typeof selectedObject.textOffset !== 'undefined') {
-        y -= selectedObject.textOffset;
-    }
+		// FIX: always apply perpendicular offset, not just when selected
+		if(textOffset !== 0) {
+			x += textOffset * Math.sin(angleOrNull);
+			y -= textOffset * Math.cos(angleOrNull);
+		}
+	} else {
+		// FIX: always apply vertical offset for nodes/self-links, not just when selected
+		if(textOffset !== 0) {
+			y -= textOffset;
+		}
+	}
 
-	if('advancedFillText' in c) c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull);
-	else {
+	if('advancedFillText' in c) {
+		// FIX: pass sourceObj through to advancedFillText
+		c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull, sourceObj);
+	} else {
 		x = Math.round(x); y = Math.round(y); c.fillText(text, x, y + 6);
 		if(isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
 			x += width; c.beginPath(); c.moveTo(x, y - 10); c.lineTo(x, y + 10); c.stroke();
@@ -458,18 +469,19 @@ document.onkeydown = function(e) {
 	if(key == 16) shift = true;
 	else if(!canvasHasFocus()) return true;
 
-    // Offset control
-    if(selectedObject != null && typeof selectedObject.textOffset !== 'undefined') {
-        if(key == 38) { selectedObject.textOffset += 5; draw(); return false; }
-        if(key == 40) { selectedObject.textOffset -= 5; draw(); return false; }
-    }
+	// FIX: flipped arrow key directions — Up (38) should increase offset to move text up,
+	// Down (40) should decrease offset to move text down (canvas Y increases downward).
+	if(selectedObject != null && typeof selectedObject.textOffset !== 'undefined') {
+		if(key == 38) { selectedObject.textOffset -= 5; draw(); return false; }
+		if(key == 40) { selectedObject.textOffset += 5; draw(); return false; }
+	}
 
 	if(key == 8) { if(selectedObject != null && 'text' in selectedObject) { selectedObject.text = selectedObject.text.substr(0, selectedObject.text.length - 1); resetCaret(); draw(); } return false; }
-	if(key == 46) { if(selectedObject != null) { 
-        nodes = nodes.filter(n => n != selectedObject); 
-        links = links.filter(l => l != selectedObject && l.node != selectedObject && l.nodeA != selectedObject && l.nodeB != selectedObject);
-        selectedObject = null; draw(); 
-    } }
+	if(key == 46) { if(selectedObject != null) {
+		nodes = nodes.filter(n => n != selectedObject);
+		links = links.filter(l => l != selectedObject && l.node != selectedObject && l.nodeA != selectedObject && l.nodeB != selectedObject);
+		selectedObject = null; draw();
+	} }
 };
 document.onkeyup = function(e) { if(crossBrowserKey(e) == 16) shift = false; };
 document.onkeypress = function(e) {
