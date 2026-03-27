@@ -2,7 +2,7 @@
  Finite State Machine Designer (https://madebyevan.com/fsm/)
  License: MIT License
  Copyright (c) 2010 Evan Wallace
- Modded 2024 for Smart Subscripts and Text Offsets
+ Modded 2024 for Smart Subscripts, Text Offsets & Perfect Centering
 */
 
 function ExportAsLaTeX() {
@@ -66,28 +66,12 @@ function ExportAsLaTeX() {
 		return c.measureText(text);
 	};
 	
-	// FIX: Removed the buggy offsetValue double-shifting. 
-	// x and y already contain the correct physical offset from drawText.
 	this.advancedFillText = function(text, originalText, x, y, angleOrNull, sourceObj) {
 		if(text.replace(' ', '').length > 0) {
-			var nodeParams = '';
-
-			if(angleOrNull != null) {
-				var width = this.measureText(text).width;
-				var dx = Math.cos(angleOrNull);
-				var dy = Math.sin(angleOrNull);
-				
-				if(Math.abs(dx) > Math.abs(dy)) {
-					if(dx > 0) nodeParams = '[right] ', x -= width / 2; 
-					else nodeParams = '[left] ', x += width / 2;
-				} else {
-					if(dy > 0) nodeParams = '[below] ', y -= 10; 
-					else nodeParams = '[above] ', y += 10;
-				}
-			}
-
 			x *= this._scale; y *= this._scale;
-			this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node ' + nodeParams + '{$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
+            // Since our JS now calculates the EXACT centered coordinate, 
+            // we just tell TikZ to drop the text right there. No hacks needed!
+			this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node {$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
 		}
 	};
 	this.translate = this.save = this.restore = this.clearRect = function(){};
@@ -354,30 +338,46 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected, sourceObj) {
 	var text = convertLatexShortcuts(originalText);
 	c.font = '20px "Times New Roman", serif';
 	var width = c.measureText(text).width;
+    
+    // ממרכז אופקית את הטקסט ביחס לנקודת ההתחלה הנתונה
 	x -= width / 2;
 
 	var textOffset = (sourceObj && typeof sourceObj.textOffset !== 'undefined') ? sourceObj.textOffset : 0;
 
-	if(angleOrNull != null) {
-		var cos = Math.cos(angleOrNull); var sin = Math.sin(angleOrNull);
-		var cornerX = (width / 2 + 5) * (cos > 0 ? 1 : -1); var cornerY = (10 + 5) * (sin > 0 ? 1 : -1);
-		var slide = sin * Math.pow(Math.abs(sin), 40) * cornerX - cos * Math.pow(Math.abs(cos), 10) * cornerY;
-		x += cornerX - sin * slide; y += cornerY + cos * slide;
-
-		if(textOffset !== 0) {
-			x += textOffset * Math.sin(angleOrNull);
-			y -= textOffset * Math.cos(angleOrNull);
+    // כאן מחליפים את ה-slide הישן במרחק קבוע ונקי מהקו
+	if (sourceObj instanceof Link) {
+		var stuff = sourceObj.getEndPointsAndCircle();
+		if (stuff.hasCircle) {
+            // חצים מעוקלים: דוחפים החוצה לפי הרדיוס
+			var dist = 17 + textOffset; 
+			x += dist * Math.cos(angleOrNull);
+			y += dist * Math.sin(angleOrNull);
+		} else {
+            // חצים ישרים: דוחפים בדיוק במאונך לקו כדי לשמור על מרכוז מושלם
+			var dist = 15 + textOffset;
+			x += dist * Math.cos(angleOrNull);
+			y -= dist * Math.sin(angleOrNull);
 		}
+	} else if (sourceObj instanceof SelfLink) {
+        // לולאות עצמיות
+		var dist = 20 + textOffset; 
+		x += dist * Math.cos(angleOrNull);
+		y += dist * Math.sin(angleOrNull);
+	} else if (sourceObj instanceof StartLink) {
+        // חץ התחלתי: דוחפים אחורה לאורך הזנב
+		var dist = 20 + textOffset;
+		x += dist * Math.cos(angleOrNull);
+		y += dist * Math.sin(angleOrNull);
 	} else {
-		if(textOffset !== 0) {
-			y -= textOffset;
-		}
+        // טקסט בתוך עיגול המצב
+		if (textOffset !== 0) y -= textOffset;
 	}
 
 	if('advancedFillText' in c) {
 		c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull, sourceObj);
 	} else {
-		x = Math.round(x); y = Math.round(y); c.fillText(text, x, y + 6);
+		x = Math.round(x); y = Math.round(y); 
+        c.fillText(text, x, y + 6);
 		if(isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
 			x += width; c.beginPath(); c.moveTo(x, y - 10); c.lineTo(x, y + 10); c.stroke();
 		}
@@ -452,10 +452,9 @@ document.onkeydown = function(e) {
 	if(key == 16) shift = true;
 	else if(!canvasHasFocus()) return true;
 
-	// FIX: Reverted arrow keys behavior so it reacts intuitively
 	if(selectedObject != null && typeof selectedObject.textOffset !== 'undefined') {
-		if(key == 38) { selectedObject.textOffset += 5; draw(); return false; } // למעלה - יגדיל אופסט ויזיז החוצה
-		if(key == 40) { selectedObject.textOffset -= 5; draw(); return false; } // למטה - יקטין אופסט ויזיז פנימה
+		if(key == 38) { selectedObject.textOffset += 5; draw(); return false; } 
+		if(key == 40) { selectedObject.textOffset -= 5; draw(); return false; } 
 	}
 
 	if(key == 8) { if(selectedObject != null && 'text' in selectedObject) { selectedObject.text = selectedObject.text.substr(0, selectedObject.text.length - 1); resetCaret(); draw(); } return false; }
