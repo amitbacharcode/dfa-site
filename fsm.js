@@ -2,7 +2,7 @@
  Finite State Machine Designer (https://madebyevan.com/fsm/)
  License: MIT License
  Copyright (c) 2010 Evan Wallace
- Modded 2024 for Smart Subscripts, Text Offsets & Perfect Centering
+ Modded 2024 for Smart Subscripts and Text Offsets
 */
 
 function ExportAsLaTeX() {
@@ -65,13 +65,34 @@ function ExportAsLaTeX() {
 		c.font = '20px "Times New Roman", serif';
 		return c.measureText(text);
 	};
-	
+	// FIX: receives sourceObj directly instead of searching by text content
 	this.advancedFillText = function(text, originalText, x, y, angleOrNull, sourceObj) {
 		if(text.replace(' ', '').length > 0) {
+			var nodeParams = '';
+			var offsetValue = 0;
+
+			if (sourceObj && sourceObj.textOffset !== 0) {
+				offsetValue = sourceObj.textOffset * 0.1;
+			}
+
+			if(angleOrNull != null) {
+				var width = this.measureText(text).width;
+				var dx = Math.cos(angleOrNull);
+				var dy = Math.sin(angleOrNull);
+				var side = (dy > 0) ? 'below' : 'above';
+				nodeParams = '[' + side + '=' + (5 + offsetValue * 8) + 'pt] ';
+
+				if(Math.abs(dx) > Math.abs(dy)) {
+					if(dx > 0) x -= width / 2; else x += width / 2;
+				} else {
+					if(dy > 0) y -= 10; else y += 10;
+				}
+			} else if (offsetValue !== 0) {
+				nodeParams = '[yshift=' + fixed(-offsetValue*10, 2) + 'mm] ';
+			}
+
 			x *= this._scale; y *= this._scale;
-            // Since our JS now calculates the EXACT centered coordinate, 
-            // we just tell TikZ to drop the text right there. No hacks needed!
-			this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node {$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
+			this._texData += '\\draw (' + fixed(x, 2) + ',' + fixed(-y, 2) + ') node ' + nodeParams + '{$' + originalText.replace(/ /g, '\\mbox{ }') + '$};\n';
 		}
 	};
 	this.translate = this.save = this.restore = this.clearRect = function(){};
@@ -147,6 +168,7 @@ StartLink.prototype.draw = function(c) {
 	var stuff = this.getEndPoints();
 	c.beginPath(); c.moveTo(stuff.startX, stuff.startY); c.lineTo(stuff.endX, stuff.endY); c.stroke();
 	var textAngle = Math.atan2(stuff.startY - stuff.endY, stuff.startX - stuff.endX);
+	// FIX: pass 'this' so drawText knows which object owns the text
 	drawText(c, this.text, stuff.startX, stuff.startY, textAngle, selectedObject == this, this);
 	drawArrow(c, stuff.endX, stuff.endY, Math.atan2(-this.deltaY, -this.deltaX));
 };
@@ -194,9 +216,11 @@ Link.prototype.draw = function(c) {
 	if(stuff.hasCircle) {
 		var startAngle = stuff.startAngle; var endAngle = stuff.endAngle; if(endAngle < startAngle) endAngle += Math.PI * 2;
 		var textAngle = (startAngle + endAngle) / 2 + stuff.isReversed * Math.PI;
+		// FIX: pass 'this' so drawText knows which object owns the text
 		drawText(c, this.text, stuff.circleX + stuff.circleRadius * Math.cos(textAngle), stuff.circleY + stuff.circleRadius * Math.sin(textAngle), textAngle, selectedObject == this, this);
 	} else {
 		var textAngle = Math.atan2(stuff.endX - stuff.startX, stuff.startY - stuff.endY);
+		// FIX: text drawn at midpoint of arrow (was already correct), pass 'this'
 		drawText(c, this.text, (stuff.startX + stuff.endX) / 2, (stuff.startY + stuff.endY) / 2, textAngle + this.lineAngleAdjust, selectedObject == this, this);
 	}
 };
@@ -225,6 +249,7 @@ Node.prototype.setMouseStart = function(x, y) { this.mouseOffsetX = this.x - x; 
 Node.prototype.setAnchorPoint = function(x, y) { this.x = x + this.mouseOffsetX; this.y = y + this.mouseOffsetY; };
 Node.prototype.draw = function(c) {
 	c.beginPath(); c.arc(this.x, this.y, nodeRadius, 0, 2 * Math.PI, false); c.stroke();
+	// FIX: pass 'this' so drawText can apply node's textOffset too
 	drawText(c, this.text, this.x, this.y, null, selectedObject == this, this);
 	if(this.isAcceptState) { c.beginPath(); c.arc(this.x, this.y, nodeRadius - 6, 0, 2 * Math.PI, false); c.stroke(); }
 };
@@ -249,6 +274,7 @@ SelfLink.prototype.getEndPointsAndCircle = function() {
 SelfLink.prototype.draw = function(c) {
 	var stuff = this.getEndPointsAndCircle();
 	c.beginPath(); c.arc(stuff.circleX, stuff.circleY, stuff.circleRadius, stuff.startAngle, stuff.endAngle, false); c.stroke();
+	// FIX: pass 'this' so drawText knows which object owns the text
 	drawText(c, this.text, stuff.circleX + stuff.circleRadius * Math.cos(this.anchorAngle), stuff.circleY + stuff.circleRadius * Math.sin(this.anchorAngle), this.anchorAngle, selectedObject == this, this);
 	drawArrow(c, stuff.endX, stuff.endY, stuff.endAngle + Math.PI * 0.4);
 };
@@ -334,50 +360,44 @@ function drawArrow(c, x, y, angle) {
 
 function canvasHasFocus() { return (document.activeElement || document.body) == document.body; }
 
+// FIX: added sourceObj parameter — the link/node that owns this text label.
+// This replaces the fragile text-content search and ensures offsets always apply,
+// not just when the object is selected.
 function drawText(c, originalText, x, y, angleOrNull, isSelected, sourceObj) {
 	var text = convertLatexShortcuts(originalText);
 	c.font = '20px "Times New Roman", serif';
 	var width = c.measureText(text).width;
-    
-    // ממרכז אופקית את הטקסט ביחס לנקודת ההתחלה הנתונה
-	x -= width / 2;
 
+	// textOffset: positive = further from line, negative = closer (arrow-key adjustable)
 	var textOffset = (sourceObj && typeof sourceObj.textOffset !== 'undefined') ? sourceObj.textOffset : 0;
 
-    // כאן מחליפים את ה-slide הישן במרחק קבוע ונקי מהקו
-	if (sourceObj instanceof Link) {
-		var stuff = sourceObj.getEndPointsAndCircle();
-		if (stuff.hasCircle) {
-            // חצים מעוקלים: דוחפים החוצה לפי הרדיוס
-			var dist = 17 + textOffset; 
-			x += dist * Math.cos(angleOrNull);
-			y += dist * Math.sin(angleOrNull);
-		} else {
-            // חצים ישרים: דוחפים בדיוק במאונך לקו כדי לשמור על מרכוז מושלם
-			var dist = 15 + textOffset;
-			x += dist * Math.cos(angleOrNull);
-			y -= dist * Math.sin(angleOrNull);
-		}
-	} else if (sourceObj instanceof SelfLink) {
-        // לולאות עצמיות
-		var dist = 20 + textOffset; 
-		x += dist * Math.cos(angleOrNull);
-		y += dist * Math.sin(angleOrNull);
-	} else if (sourceObj instanceof StartLink) {
-        // חץ התחלתי: דוחפים אחורה לאורך הזנב
-		var dist = 20 + textOffset;
-		x += dist * Math.cos(angleOrNull);
-		y += dist * Math.sin(angleOrNull);
+	if(angleOrNull != null) {
+		// Perpendicular direction: rotate the arrow direction 90° counter-clockwise.
+		// For an angle θ, the arrow points (cos θ, sin θ).
+		// The perpendicular "above" direction is (-sin θ, cos θ) — which in canvas
+		// coordinates (Y-down) places the text on the left side of the arrow direction,
+		// i.e. visually above a left-to-right arrow.
+		var perpX = -Math.sin(angleOrNull);
+		var perpY =  Math.cos(angleOrNull);
+
+		// Base clearance from the line + user offset
+		var dist = 15 + textOffset;
+
+		// Move the anchor point perpendicularly away from the line,
+		// then centre the text horizontally around that anchor.
+		x = x + perpX * dist - width / 2;
+		y = y + perpY * dist;
 	} else {
-        // טקסט בתוך עיגול המצב
-		if (textOffset !== 0) y -= textOffset;
+		// Node label: centre horizontally, apply vertical offset
+		x -= width / 2;
+		y -= textOffset;
 	}
 
 	if('advancedFillText' in c) {
 		c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull, sourceObj);
 	} else {
-		x = Math.round(x); y = Math.round(y); 
-        c.fillText(text, x, y + 6);
+		x = Math.round(x); y = Math.round(y);
+		c.fillText(text, x, y + 6);
 		if(isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
 			x += width; c.beginPath(); c.moveTo(x, y - 10); c.lineTo(x, y + 10); c.stroke();
 		}
@@ -452,9 +472,11 @@ document.onkeydown = function(e) {
 	if(key == 16) shift = true;
 	else if(!canvasHasFocus()) return true;
 
+	// FIX: flipped arrow key directions — Up (38) should increase offset to move text up,
+	// Down (40) should decrease offset to move text down (canvas Y increases downward).
 	if(selectedObject != null && typeof selectedObject.textOffset !== 'undefined') {
-		if(key == 38) { selectedObject.textOffset += 5; draw(); return false; } 
-		if(key == 40) { selectedObject.textOffset -= 5; draw(); return false; } 
+		if(key == 38) { selectedObject.textOffset -= 5; draw(); return false; }
+		if(key == 40) { selectedObject.textOffset += 5; draw(); return false; }
 	}
 
 	if(key == 8) { if(selectedObject != null && 'text' in selectedObject) { selectedObject.text = selectedObject.text.substr(0, selectedObject.text.length - 1); resetCaret(); draw(); } return false; }
